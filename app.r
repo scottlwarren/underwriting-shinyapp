@@ -30,10 +30,12 @@ tbl(con, 'policies') %>%
   ) %>%
 compute(name = 'policies_metrics', temporary = FALSE, overwrite = TRUE) ## essentially creates a materialised view.
 
+tbl(con, 'claims')
+
 duckdb_unregister(con, 'policies')
 
-dbGetQuery(con, 'SELECT * FROM policies_metrics LIMIT 100')
-dbGetQuery(con, 'SELECT * FROM claims LIMIT 10')
+# dbGetQuery(con, 'SELECT * FROM policies_metrics LIMIT 100')
+# dbGetQuery(con, 'SELECT * FROM claims LIMIT 10')
 
 
 
@@ -86,6 +88,7 @@ server <- function(input, output, session) {
       age_factor = as.numeric(factors)
     )
   })
+  
   
   
 
