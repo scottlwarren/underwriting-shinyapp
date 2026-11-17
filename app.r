@@ -13,4 +13,6 @@ library(duckdb)
 con <- dbConnect(duckdb::duckdb())
 duckdb::dbWriteTable(con, 'claims_bdx', claims_bdx)
 duckdb::dbWriteTable(con, 'policy_bdx', policy_bdx)
-dbGetQuery(con, paste0("SELECT * FROM claims_bdx LIMIT 10"))
+## test query - dbGetQuery(con, paste0("SELECT * FROM claims_bdx LIMIT 10"))
+## test query -dbGetQuery(con, read_file('query.sql'))
+
