@@ -95,7 +95,7 @@ server <- function(input, output, session) {
     )
   })
   
-  ## Tab 1: Age band and factors (Matched ID to UI: age_summary_tbl)
+  ## ageband factors tab
   output$age_summary_tbl <- renderTable({
     prem_summary <- tbl(con, 'policies_metrics') %>%
       left_join(age_factor_table(), by = 'age_band', copy = TRUE) %>%
@@ -129,7 +129,7 @@ server <- function(input, output, session) {
       arrange(age_band)        
   })
 
-  ## Tab 2: Triangulation
+  ## tri tab
   output$triangle_tbl <- renderTable({
     tbl(con, 'claims_tri') %>%
       filter(!is.na(uw_year), dev_year >= 0) %>%
