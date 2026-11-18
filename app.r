@@ -14,6 +14,7 @@ duckdb_register(con, 'claims', claims_bdx)
 duckdb_register(con, 'policies', policy_bdx)
 
 age_bands <- c('0-4', '5-10', '11-15', '16-20', '20+')
+prime_use_levels <- levels(as.factor(policy_bdx$primary_use))
 
 dbExecute(con, "DROP TABLE IF EXISTS policies_metrics")
 tbl(con, 'policies') %>% 
@@ -33,12 +34,12 @@ dbExecute(con, "DROP TABLE IF EXISTS claims_tri")
 tbl(con, 'claims') %>%
   left_join(
     tbl(con, 'policies_metrics') %>%
-      select(policy_ref, uw_year, inception_date, age_band),
+      select(policy_ref, uw_year, inception_date, age_band, primary_use), ## Add stuff in here for new features!
     by = 'policy_ref'
   ) %>%
   mutate(
     loss_year = year(as.Date(loss_date)),
-    dev_year  = loss_year - uw_year
+    dev_year  = loss_year-uw_year
   ) %>%
   compute(name = 'claims_tri', temporary = FALSE)
 
@@ -51,24 +52,43 @@ ui <- fluidPage(
   titlePanel('Horse Insurance Underwriting Tool POC'),
   sidebarLayout(
     sidebarPanel(
-      tags$strong("Horse Age Group Factors (Multiplier):"),
-      tags$br(), tags$br(),
-      fluidRow(
-        lapply(age_bands, function(band) {
-          input_id <- paste0("factor_", gsub("[^0-9]", "_", band))
-          column(
-            width = 6,
-            numericInput(
-              inputId = input_id,
-              label   = paste("Age", band),
-              value   = 1.00,
-              min     = 0.10,
-              max     = 5.00,
-              step    = 0.05
-            )
+      tabsetPanel(
+      tabPanel(
+        ###. AGES
+       tags$strong("Horse Age Group Factors (Multiplier):"),
+       tags$br(),
+       fluidRow(
+         lapply(age_bands, function(band) {
+           input_id <- paste0("factor_", gsub("[^0-9]", "_", band))
+           column(
+             width = 6,
+             numericInput(
+               inputId = input_id,
+               label   = paste("Age", band),
+               value   = 1.00,
+               min     = 0.10,
+               max     = 5.00,
+               step    = 0.05
+             )
+           )
+         })
+       )
+     ),
+     tabPanel(
+      ### PRIMARY USE 
+       tags$strong('Primary Use Factors (Multiplier):'),
+       tags$br(),
+       fluidRow(
+         lapply(prime_use_levels, function(use) {
+input_id <- paste0("factor_use_", gsub("[^A-Za-z0-9]", "_", use))
+              column(
+                width = 6,
+                numericInput(input_id, use, value = 1.00, min = 0.10, max = 5.00, step = 0.05)
+              )
+            })
           )
-        })
-      )
+        )
+     )
     ),
     mainPanel(
       tabsetPanel(
@@ -94,17 +114,30 @@ server <- function(input, output, session) {
       age_factor = as.numeric(factors)
     )
   })
+
+  use_factor_table <- reactive({
+    factors <- sapply(prime_use_levels, function(use) {
+      val <- input[[paste0("factor_use_", gsub("[^A-Za-z0-9]", "_", use))]]
+      if (is.null(val) || is.na(val)) 1.0 else val
+    })
+    tibble(primary_use = prime_use_levels, use_factor = as.numeric(factors))
+  })
   
   ## ageband factors tab
   output$age_summary_tbl <- renderTable({
     prem_summary <- tbl(con, 'policies_metrics') %>%
       left_join(age_factor_table(), by = 'age_band', copy = TRUE) %>%
+      left_join(use_factor_table(), by = 'primary_use', copy = TRUE) %>%
+      mutate(
+        combined_factors = coalesce(age_factor, 1.0) * coalesce(use_factor, 1.0),
+        adjusted_premium = gross_premium * combined_factors
+      ) %>%
       group_by(age_band) %>%
       summarise(
         age_factor       = max(age_factor, na.rm = TRUE),
         policy_count     = n(),
         base_premium     = sum(gross_premium, na.rm = TRUE),
-        adjusted_premium = sum(gross_premium * age_factor, na.rm = TRUE),
+        adjusted_premium = sum(adjusted_premium, na.rm = TRUE),
         .groups          = 'drop'
       ) %>%
       collect()
