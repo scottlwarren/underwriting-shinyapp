@@ -93,6 +93,7 @@ input_id <- paste0("factor_use_", gsub("[^A-Za-z0-9]", "_", use))
     mainPanel(
       tabsetPanel(
         tabPanel("Age Band Summary", tableOutput("age_summary_tbl")),
+        tabPanel('Primary Use Chart', plotOutput('use_lr_plot')),
         tabPanel("Claims Triangle (UW Year)", tableOutput("triangle_tbl"))
       )
     )
@@ -182,6 +183,77 @@ server <- function(input, output, session) {
         names_prefix = 'Dev_'
       )
   }, na = '')
+
+
+## loss ratio chart (by primary use)
+output$use_lr_plot <- renderPlot({
+  prem_by_use <- tbl(con, 'policies_metrics') %>%
+    left_join(age_factor_table(), by = 'age_band', copy = TRUE) %>%
+    left_join(use_factor_table(), by = 'primary_use', copy = TRUE) %>%
+      mutate(
+        combined_factors = coalesce(age_factor, 1.0) * coalesce(use_factor, 1.0),
+        adjusted_premium = gross_premium * combined_factors
+      ) %>%
+    group_by(primary_use) %>%
+    summarise(
+      base_premium = sum(gross_premium, na.rm = TRUE),
+      adjusted_premium = sum(adjusted_premium, na.rm = TRUE),
+      .groups = 'drop'
+    ) %>%
+    collect()
+
+  loss_by_use <- tbl(con, 'claims_tri') %>%
+    group_by(primary_use) %>%
+    summarise(
+      total_incurred = sum(incurred, na.rm = TRUE),
+      .groups = 'drop'
+    ) %>%
+    collect()
+
+  plot_data <- prem_by_use %>%
+    left_join(loss_by_use, by = 'primary_use') %>%
+    mutate(
+      total_incurred = coalesce(total_incurred, 1.0),
+      adjusted_lr = total_incurred/adjusted_premium,
+      over_100 = adjusted_lr > 1.0
+    )
+  
+  ## now the plot itself, will use the over 100 column for conditional formatting of the bar
+  ggplot(plot_data, 
+    aes(
+      x = reorder(primary_use, -adjusted_lr),
+      y= adjusted_lr,
+      fill = over_100
+    )) +
+    geom_col(width = .6) +
+    geom_hline(yintercept = 1.0, linetype = 'dotted', colour = 'darkred', linewidth = .8) +
+    geom_text(
+      aes(label = sprintf('%.1f%%', adjusted_lr*100)),
+        vjust = -.5,
+        size = 4,
+        fontface = 'bold'
+    ) +
+    scale_fill_manual(
+      values = c("FALSE" = "#2c7fb8", "TRUE" = "#d95f02"), # blue under 100%, Red/Orange over 100%
+      guide  = "none"
+    ) +
+    scale_y_continuous(
+      labels = scales::percent_format(accuracy = 1),
+      expand = expansion(mult = c(0,.15))
+    ) +
+    labs(
+      title = 'Adjusted LR by primary use type',
+      subtitle = 'Dotted line indicates the 100 % loss ratio threshold',
+      x = 'Primary Use Category',
+      y = 'Adjusted Loss Ratio'
+    ) +
+    theme_minimal(base_size = 14) +
+        theme(
+          axis.text.x = element_text(angle = 30, hjust = 1),
+          plot.title = element_text(face = 'bold')
+        )
+})
+        
 }
   
 shinyApp(ui, server)
